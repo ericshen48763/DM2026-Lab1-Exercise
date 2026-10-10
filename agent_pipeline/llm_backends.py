@@ -149,19 +149,30 @@ def build_llm_for_backend(
     keys = get_api_keys(backend, env_path=env_path)
     if not keys:
         get_api_key(backend, env_path=env_path)  # raises the standard, descriptive error
-    models = [build_llm(backend, key, temperature=temperature, timeout=timeout) for key in keys]
+
+    if backend == "gemini":
+        # Gemini provides independent quotas per model. Rotating across both
+        # gemini-3.6-flash and gemini-3.5-flash effectively multiplies the quota pool.
+        gemini_models = ["gemini-3.6-flash", "gemini-3.5-flash"]
+        models = [
+            build_llm(backend, key, temperature=temperature, timeout=timeout, model=m)
+            for m in gemini_models
+            for key in keys
+        ]
+    else:
+        models = [build_llm(backend, key, temperature=temperature, timeout=timeout) for key in keys]
 
     from .llm_key_rotation import RotatingKeyChatModel
 
     return RotatingKeyChatModel(models, name=backend)
 
 
-def build_llm(backend: str, api_key: str, temperature: float = 0, timeout: float = _DEFAULT_REQUEST_TIMEOUT_SECONDS):
+def build_llm(backend: str, api_key: str, temperature: float = 0, timeout: float = _DEFAULT_REQUEST_TIMEOUT_SECONDS, model: str = None):
     if backend == "groq":
         from langchain_groq import ChatGroq
 
         return ChatGroq(
-            model=_MODEL_BY_BACKEND["groq"],
+            model=model or _MODEL_BY_BACKEND["groq"],
             groq_api_key=api_key,
             temperature=temperature,
             request_timeout=timeout,
@@ -182,7 +193,7 @@ def build_llm(backend: str, api_key: str, temperature: float = 0, timeout: float
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return ChatGoogleGenerativeAI(
-            model=_MODEL_BY_BACKEND["gemini"],
+            model=model or _MODEL_BY_BACKEND["gemini"],
             google_api_key=api_key,
             temperature=temperature,
             timeout=timeout,
